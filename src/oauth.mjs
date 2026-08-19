@@ -31,6 +31,9 @@ export const CODEX_OAUTH = Object.freeze({
 export const PACKAGE_IDENTITY = Object.freeze({
   product: "@hypermemetic-ai/qq-models",
   version: "0.0.0",
+  // cli-chat-proxy.grok.com 426s versions below 0.1.202. This is the proxy
+  // floor, not the npm version. User-Agent stays qq-models/0.0.0.
+  grokClientVersion: "1.0.3",
   url: "https://github.com/hypermemetic-ai/qq",
 });
 

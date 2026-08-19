@@ -91,7 +91,7 @@ function proxyHeaders(token, modelId, sessionId) {
     Authorization: `Bearer ${token}`,
     "User-Agent": userAgent(),
     "x-grok-client-identifier": PACKAGE_IDENTITY.product,
-    "x-grok-client-version": PACKAGE_IDENTITY.version,
+    "x-grok-client-version": PACKAGE_IDENTITY.grokClientVersion,
     "x-grok-client-mode": "headless",
     "x-grok-conv-id": sessionId || requestId,
     "x-grok-req-id": requestId,
