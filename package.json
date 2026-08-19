@@ -1,0 +1,31 @@
+{
+  "name": "@hypermemetic-ai/qq-models",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Named model connectors for the qq DSH host. Loading this plugin is how qq connects language models.",
+  "main": "src/plugin.mjs",
+  "bin": {
+    "qq-models-login": "bin/login.mjs"
+  },
+  "exports": {
+    ".": "./src/plugin.mjs",
+    "./home": "./src/home.mjs",
+    "./store": "./src/store.mjs",
+    "./connectors": "./src/connectors.mjs",
+    "./command": "./src/command.mjs",
+    "./login": "./src/login.mjs",
+    "./qwen": "./src/qwen.mjs"
+  },
+  "files": [
+    "src/",
+    "bin/",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
