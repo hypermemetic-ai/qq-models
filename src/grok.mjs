@@ -24,6 +24,11 @@ export class GrokLlmError extends Error {
     this.name = "GrokLlmError";
     this.code = code;
     if (status !== undefined) this.status = status;
+    this.failure = Object.freeze({
+      message,
+      code,
+      ...status === undefined ? {} : { status },
+    });
   }
 }
 
@@ -52,7 +57,7 @@ export function classifyGrokFailure(error) {
   const status = httpStatus(error);
   if (status === 401) return "auth";
   if (status === 400 || status === 422) return "reject";
-  if (status === undefined) return "transport";
+  if (status === undefined || status === 408 || status === 409 || status === 429 || status >= 500) return "transport";
   return "other";
 }
 

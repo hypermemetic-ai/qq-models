@@ -10,6 +10,7 @@ import { createCodexAdapter } from "./codex.mjs";
 import { createAuthStore } from "./store.mjs";
 import { createLoginService } from "./login.mjs";
 import { qwenReady } from "./qwen.mjs";
+import { attachAgents } from "./grok-auto-continue.mjs";
 
 export const name = "qq-models";
 export const inject = [];
@@ -98,6 +99,12 @@ export function apply(ctx, config = {}) {
   if (typeof ctx.inject === "function") ctx.inject(["commands"], registerCommand);
   else registerCommand(ctx);
 
+  try {
+    attachAgents(ctx);
+  } catch (error) {
+    ctx.logger?.warn?.(`qq-models: grok-auto-continue: ${error instanceof Error ? error.message : error}`);
+  }
+
   const service = Object.freeze({
     store,
     login,
@@ -113,4 +120,5 @@ export function apply(ctx, config = {}) {
 
 export const internals = Object.freeze({
   CONNECTORS,
+  attachAgents,
 });
