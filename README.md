@@ -19,6 +19,12 @@ thing: a named connector this plugin can attach.
 
 Qwen stays on the host recipe. Picking qwen does not start OAuth.
 
+Grok (`xai-auth`) speaks the OpenAI Responses proxy. DSH tool schemas are
+sent as Responses function tools under their DSH names. Tool-call history
+round-trips as `function_call` / `function_call_output`. The adapter does
+not remap names and does not add provider-hosted search tools. DSH still
+executes tools.
+
 ## `/login` and `/logout`
 
 Bare `/login` is a phone sheet of pressable connector names. Named
