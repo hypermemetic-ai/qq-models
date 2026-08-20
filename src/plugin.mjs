@@ -99,11 +99,17 @@ export function apply(ctx, config = {}) {
   if (typeof ctx.inject === "function") ctx.inject(["commands"], registerCommand);
   else registerCommand(ctx);
 
+  let disposeAgents = () => {};
   try {
-    attachAgents(ctx);
+    disposeAgents = attachAgents(ctx) ?? disposeAgents;
   } catch (error) {
     ctx.logger?.warn?.(`qq-models: grok-auto-continue: ${error instanceof Error ? error.message : error}`);
   }
+
+  ctx.effect(() => async () => {
+    disposeAgents();
+    await login.dispose();
+  }, "qq-models: live work");
 
   const service = Object.freeze({
     store,

@@ -150,6 +150,15 @@ export function createLoginService({
     return store.rotate(connectorId, (current) => refreshTokenFn(connectorId, current, { fetchImpl, now }));
   }
 
+  async function dispose() {
+    const active = [...polls.values()];
+    for (const poll of active) poll.controller.abort();
+    await Promise.allSettled(active.map((poll) => poll.work));
+    polls.clear();
+    sheets.clear();
+    cancelled.clear();
+  }
+
   return Object.freeze({
     handleLogin,
     handleLogout,
@@ -162,6 +171,7 @@ export function createLoginService({
     beginPoll,
     status,
     refresh,
+    dispose,
     polls,
   });
 }

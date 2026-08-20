@@ -314,16 +314,18 @@ export function attachGrokAutoContinue(agent, deps = {}) {
 
 export function attachAgents(ctx, deps = {}) {
   const agents = ctx?.get?.("agents", false) ?? ctx?.agents;
-  const attached = new WeakSet();
-  const disposers = new WeakMap();
+  const attached = new Set();
+  const disposers = new Map();
   const attach = (agent) => {
     if (!agent || attached.has(agent)) return;
     attached.add(agent);
     disposers.set(agent, attachGrokAutoContinue(agent, deps));
   };
+  let disposeCreated;
+  let disposeDisposed;
   if (typeof ctx?.on === "function") {
-    ctx.on("agent/created", ({ agent }) => attach(agent));
-    ctx.on("agent/disposed", ({ agent }) => {
+    disposeCreated = ctx.on("agent/created", ({ agent }) => attach(agent));
+    disposeDisposed = ctx.on("agent/disposed", ({ agent }) => {
       disposers.get(agent)?.();
       disposers.delete(agent);
       attached.delete(agent);
@@ -338,4 +340,11 @@ export function attachAgents(ctx, deps = {}) {
       }
     }
   }
+  return () => {
+    disposeCreated?.();
+    disposeDisposed?.();
+    for (const dispose of disposers.values()) dispose();
+    disposers.clear();
+    attached.clear();
+  };
 }
