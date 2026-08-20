@@ -88,14 +88,72 @@ function messageText(block) {
   return typeof block?.text === "string" ? block.text : "";
 }
 
+function isNonArrayObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function cloneSchemaValue(value) {
+  if (Array.isArray(value)) return value.map(cloneSchemaValue);
+  if (!isNonArrayObject(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [key, cloneSchemaValue(child)]),
+  );
+}
+
+function invalidToolSchema(index, detail) {
+  return new GrokLlmError(
+    `grok tool schema at index ${index} is invalid: ${detail}`,
+    "INVALID_TOOL_SCHEMA",
+  );
+}
+
+/**
+ * Normalize DSH's flat parameter map into the object-root JSON Schema required
+ * by Responses. Full object schemas are cloned without semantic changes.
+ */
+export function normalizeToolParameters(parameters, index = 0) {
+  if (!isNonArrayObject(parameters)) {
+    throw invalidToolSchema(index, "parameters must be a non-array object");
+  }
+  if (Object.hasOwn(parameters, "type") && parameters.type === "object") {
+    return cloneSchemaValue(parameters);
+  }
+
+  const properties = {};
+  const required = [];
+  for (const [name, sourceSchema] of Object.entries(parameters)) {
+    if (!isNonArrayObject(sourceSchema)) {
+      throw invalidToolSchema(index, "each flat parameter must have an object schema");
+    }
+    const schema = cloneSchemaValue(sourceSchema);
+    if (typeof schema.required === "boolean") {
+      if (schema.required) required.push(name);
+      delete schema.required;
+    }
+    properties[name] = schema;
+  }
+  return {
+    type: "object",
+    properties,
+    ...required.length > 0 ? { required } : {},
+  };
+}
+
 /** Map DSH tool schemas to Responses function tools. Names pass through unchanged. */
 export function toResponsesTools(tools) {
-  return (tools ?? []).map((tool) => ({
-    type: "function",
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
-  }));
+  if (tools == null) return [];
+  if (!Array.isArray(tools)) {
+    throw new GrokLlmError("grok tools are invalid: expected an array", "INVALID_TOOL_SCHEMA");
+  }
+  return tools.map((tool, index) => {
+    if (!isNonArrayObject(tool)) throw invalidToolSchema(index, "tool must be an object");
+    return {
+      type: "function",
+      name: tool.name,
+      description: tool.description,
+      parameters: normalizeToolParameters(tool.parameters, index),
+    };
+  });
 }
 
 /**
@@ -502,8 +560,7 @@ export function createGrokAdapter({
     return store.accessToken(GROK, (current) => refreshGrokToken(current, { fetchImpl, now }));
   }
 
-  async function postOnce(options, token) {
-    const body = requestBody(options);
+  async function postOnce(options, token, body) {
     let response;
     try {
       response = await fetchImpl(GROK_PROXY_URL, {
@@ -553,6 +610,7 @@ export function createGrokAdapter({
     },
     async *stream(options) {
       this.lastRequest = undefined;
+      const body = requestBody(options);
       let token = await authorizedToken(false);
       let refreshed = false;
       let transportTries = 0;
@@ -563,7 +621,7 @@ export function createGrokAdapter({
             model: options.model,
             hasAuthorization: true,
           };
-          const events = await postOnce(options, token);
+          const events = await postOnce(options, token, body);
           for (const chunk of chunksFromEvents(events)) yield chunk;
           return;
         } catch (error) {
@@ -593,6 +651,7 @@ export const internals = Object.freeze({
   redact,
   toInput: (messages, system) => toResponsesInput(messages, system).input,
   toResponsesInput,
+  normalizeToolParameters,
   toResponsesTools,
   requestBody,
   chunksFromEvents,
