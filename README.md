@@ -25,6 +25,26 @@ round-trips as `function_call` / `function_call_output`. The adapter does
 not remap names and does not add provider-hosted search tools. DSH still
 executes tools.
 
+### Prompt-cache maximization (Grok)
+
+xAI caches from the start of the request, so the directive is two parts:
+keep the request pinned to one server *and* keep the prefix byte-stable.
+
+- `prompt_cache_key` is stamped from the loop's `sessionId` (never invented
+  per request), matching the `x-grok-conv-id` / `x-grok-session-id` headers.
+- Each Grok response requests `reasoning.encrypted_content`. Captured
+  reasoning is replayed back as the same legal `reasoning` input item via the
+  `finish` chunk's `ReplayEnvelope`, so the next turn does not drop or rephrase
+  encrypted reasoning and break the cached prefix.
+
+Old/foreign assistant messages without the `xai-auth` replay envelope skip
+reasoning as before; the harness keeps each envelope opaque and only returns it
+to the same provider's adapter.
+
+Codex (`openai-codex`) and Qwen (`qwen-token-plan`) need no equivalent: the
+Codex backend is an OpenAI Responses surface with automatic prompt caching, so
+there is no server-affinity key to stamp, and Qwen stays on the host recipe.
+
 ## `/login` and `/logout`
 
 Bare `/login` is a phone sheet of pressable connector names. Named

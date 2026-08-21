@@ -159,8 +159,22 @@ export function toResponsesTools(tools) {
 /**
  * Convert DSH messages into Responses `instructions` + `input` items.
  * `options.system` (and system-role history) become top-level `instructions`.
- * Images and reasoning are skipped; this adapter does not invent vision.
+ * Reasoning is replayed from adapter-private replayState (encrypted_content) so
+ * the cached prefix stays byte-stable; without a replay blob reasoning is
+ * skipped as before. Images are skipped; this adapter does not invent vision.
  */
+function reasoningReplayBlocks(message) {
+  const state = message?.source?.replayState;
+  if (!state || state.response?.kind !== "xai-auth" || !Array.isArray(state.blocks)) return undefined;
+  return state.blocks;
+}
+
+function isReasoningReplayItem(entry) {
+  return entry !== null && typeof entry === "object"
+    && entry.type === "reasoning"
+    && typeof entry.encrypted_content === "string" && entry.encrypted_content.length > 0;
+}
+
 export function toResponsesInput(messages, system) {
   const input = [];
   const systemTexts = [];
@@ -185,17 +199,26 @@ export function toResponsesInput(messages, system) {
       });
       continue;
     }
+    const replayBlocks = reasoningReplayBlocks(message);
     let content = [];
     const flushMessage = () => {
       if (content.length === 0) return;
       input.push({ type: "message", role, content });
       content = [];
     };
-    for (const block of message.content) {
+    for (const [index, block] of message.content.entries()) {
       switch (block?.type) {
         case "text":
           content.push({ type: role === "assistant" ? "output_text" : "input_text", text: messageText(block) });
           break;
+        case "reasoning": {
+          const replay = replayBlocks?.[index];
+          if (isReasoningReplayItem(replay)) {
+            flushMessage();
+            input.push(replay);
+          }
+          break;
+        }
         case "tool-call":
           flushMessage();
           input.push({
@@ -214,7 +237,7 @@ export function toResponsesInput(messages, system) {
           });
           break;
         default:
-          // image, reasoning, unknown: skip. No vision, no name remapping.
+          // image or unknown: skip. No vision, no name remapping.
           break;
       }
     }
@@ -227,10 +250,12 @@ export function toResponsesInput(messages, system) {
 export function requestBody(options) {
   const { instructions, input } = toResponsesInput(options.messages, options.system);
   const tools = toResponsesTools(options.tools);
+  const sessionId = typeof options.sessionId === "string" && options.sessionId.trim() !== "" ? options.sessionId : undefined;
   return {
     model: options.model,
     stream: true,
     store: false,
+    ...(sessionId === undefined ? {} : { prompt_cache_key: sessionId }),
     ...instructions === undefined ? {} : { instructions },
     input,
     include: ["reasoning.encrypted_content"],
@@ -328,6 +353,16 @@ function closeBlock(block) {
   }
 }
 
+function reasoningReplayItem(item) {
+  if (typeof item?.encrypted_content !== "string" || item.encrypted_content.length === 0) return undefined;
+  return {
+    type: "reasoning",
+    ...(item.id === undefined ? {} : { id: item.id }),
+    summary: [],
+    encrypted_content: item.encrypted_content,
+  };
+}
+
 /** Responses SSE → DSH StreamChunk. Fake XML in text is never promoted to a tool call. */
 class ResponsesStreamTranslator {
   constructor() {
@@ -390,10 +425,18 @@ class ResponsesStreamTranslator {
   finishReason(kind, failure) {
     this.terminated = true;
     this.closeAll();
+    const replayState = failure ? undefined : this.replayState();
     this.chunks.push({
       type: "finish",
       reason: failure ? { kind, failure } : { kind },
+      ...(replayState === undefined ? {} : { replayState }),
     });
+  }
+
+  replayState() {
+    const blocks = this.order.map((block) => block.replay ?? null);
+    if (!blocks.some((entry) => entry !== null)) return undefined;
+    return { response: { kind: "xai-auth", version: 1 }, blocks };
   }
 
   push(event) {
@@ -426,8 +469,7 @@ class ResponsesStreamTranslator {
       }
       case "response.reasoning_summary_text.delta":
       case "response.reasoning_text.delta": {
-        const sub = event.summary_index ?? event.content_index ?? 0;
-        const key = `${event.item_id ?? ""}:reason:${String(sub)}`;
+        const key = `${event.item_id ?? ""}:reason`;
         const block = this.reasoningBlock(key);
         const delta = event.delta ?? "";
         block.text += delta;
@@ -477,6 +519,13 @@ class ResponsesStreamTranslator {
             }
           }
           this.closeItem(item.id);
+        } else if (item.type === "reasoning") {
+          const key = `${item.id}:reason`;
+          let block = this.blocks.get(key);
+          if (block === undefined) block = this.open(key, "reasoning");
+          const replay = reasoningReplayItem(item);
+          if (replay !== undefined) block.replay = replay;
+          this.close(key);
         } else {
           this.closeItem(item.id);
         }
