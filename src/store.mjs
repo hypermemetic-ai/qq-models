@@ -102,6 +102,7 @@ export function createAuthStore({
   homeDir,
   now = Date.now,
   refreshSkewMs = REFRESH_SKEW_MS,
+  fallbacks = {},
 } = {}) {
   const config = homeDir === undefined ? {} : { homeDir };
 
@@ -123,8 +124,27 @@ export function createAuthStore({
     }
   }
 
+  function fallback(connectorId) {
+    const reader = fallbacks[connectorId];
+    if (typeof reader !== "function") return null;
+    try {
+      const value = reader();
+      if (!value || typeof value !== "object") return null;
+      if (typeof value.access !== "string" || typeof value.refresh !== "string" || !Number.isFinite(value.expires)) {
+        return null;
+      }
+      return value;
+    } catch {
+      return null;
+    }
+  }
+
+  function current(connectorId) {
+    return read(connectorId) ?? fallback(connectorId);
+  }
+
   function present(connectorId) {
-    return read(connectorId) !== null;
+    return current(connectorId) !== null;
   }
 
   async function write(connectorId, fields) {
@@ -159,9 +179,9 @@ export function createAuthStore({
   async function rotate(connectorId, refresher) {
     const file = pathFor(connectorId);
     return withFileLock(file, async () => {
-      const current = read(connectorId);
-      if (!current) throw new Error(`qq-models: ${connectorId} is not logged in`);
-      const rotated = await refresher(current);
+      const currentAuth = read(connectorId) ?? fallback(connectorId);
+      if (!currentAuth) throw new Error(`qq-models: ${connectorId} is not logged in`);
+      const rotated = await refresher(currentAuth);
       const next = parseAuth({
         schema: AUTH_SCHEMA,
         type: "oauth",
@@ -177,9 +197,9 @@ export function createAuthStore({
   }
 
   async function accessToken(connectorId, refresher) {
-    const current = read(connectorId);
-    if (!current) throw new Error(`qq-models: ${connectorId} is not logged in`);
-    if (!needsRefresh(current) || typeof refresher !== "function") return current;
+    const currentAuth = current(connectorId);
+    if (!currentAuth) throw new Error(`qq-models: ${connectorId} is not logged in`);
+    if (!needsRefresh(currentAuth) || typeof refresher !== "function") return currentAuth;
     return rotate(connectorId, refresher);
   }
 

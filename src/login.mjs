@@ -7,7 +7,8 @@ import {
   parseLoginInput,
   parseLogoutInput,
 } from "./command.mjs";
-import { CONNECTORS, oauthConnectorIds, requireConnector } from "./connectors.mjs";
+import { CODEX, CONNECTORS, oauthConnectorIds, requireConnector } from "./connectors.mjs";
+import { readPiCodexAuth } from "./pi-auth.mjs";
 import { injectNotice } from "./notice.mjs";
 import { pollDevice, refreshToken, startDevice } from "./oauth.mjs";
 import { qwenLogoutText, qwenStatusText } from "./qwen.mjs";
@@ -82,6 +83,13 @@ export function createLoginService({
   async function loginNamed(connectorId, agent) {
     const connector = requireConnector(connectorId);
     if (connector.kind === "host-key") return successResult(qwenStatusText(env));
+    if (connectorId === CODEX && !store.read(CODEX)) {
+      const imported = readPiCodexAuth(env);
+      if (imported) {
+        await store.write(CODEX, imported);
+        return successResult("Codex logged in.");
+      }
+    }
     const device = await startDeviceFn(connectorId, { fetchImpl });
     beginPoll(connectorId, device, agent);
     return successResult(formatDeviceNotice({

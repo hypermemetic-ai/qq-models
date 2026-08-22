@@ -4,11 +4,12 @@
 // it and still runs if it is absent. The start script already binds qq-*
 // siblings; this package is not named in bin/qq or host.patch.yml.
 
-import { CONNECTORS } from "./connectors.mjs";
+import { CODEX, CONNECTORS } from "./connectors.mjs";
 import { createGrokAdapter } from "./grok.mjs";
 import { createCodexAdapter } from "./codex.mjs";
 import { createAuthStore } from "./store.mjs";
 import { createLoginService } from "./login.mjs";
+import { readPiCodexAuth } from "./pi-auth.mjs";
 import { qwenReady } from "./qwen.mjs";
 import { attachAgents } from "./grok-auto-continue.mjs";
 
@@ -17,14 +18,16 @@ export const inject = [];
 export const provide = "qq-models";
 
 export function apply(ctx, config = {}) {
+  const env = config.env ?? process.env;
   const store = createAuthStore({
-    env: config.env ?? process.env,
+    env,
     homeDir: config.homeDir,
     now: config.now,
+    fallbacks: { [CODEX]: () => readPiCodexAuth(env) },
   });
   const login = createLoginService({
     store,
-    env: config.env ?? process.env,
+    env,
     fetchImpl: config.fetch,
     now: config.now,
     sleep: config.sleep,
