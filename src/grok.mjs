@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 
 import { GROK } from "./connectors.mjs";
+import { inputImagePart, loadInputImages, toolResultImages } from "./input-images.mjs";
 import { PACKAGE_IDENTITY, refreshGrokToken, userAgent } from "./oauth.mjs";
 
 export const GROK_PROXY_URL = "https://cli-chat-proxy.grok.com/v1/responses";
@@ -16,7 +17,7 @@ export const GROK_MODEL = {
   name: "Grok 4.6",
   contextWindow: 200_000,
   maxTokens: 64_000,
-  input: Object.freeze(["text"]),
+  input: Object.freeze(["text", "image"]),
 };
 
 const TRANSPORT_TRIES = 3;
@@ -161,7 +162,8 @@ export function toResponsesTools(tools) {
  * `options.system` (and system-role history) become top-level `instructions`.
  * Reasoning is replayed from adapter-private replayState (encrypted_content) so
  * the cached prefix stays byte-stable; without a replay blob reasoning is
- * skipped as before. Images are skipped; this adapter does not invent vision.
+ * skipped as before. Images become input_image parts (inline data or
+ * attachment bytes loaded before this conversion).
  */
 function reasoningReplayBlocks(message) {
   const state = message?.source?.replayState;
@@ -175,7 +177,7 @@ function isReasoningReplayItem(entry) {
     && typeof entry.encrypted_content === "string" && entry.encrypted_content.length > 0;
 }
 
-export function toResponsesInput(messages, system) {
+export function toResponsesInput(messages, system, images) {
   const input = [];
   const systemTexts = [];
   for (const message of messages ?? []) {
@@ -228,16 +230,32 @@ export function toResponsesInput(messages, system) {
             arguments: typeof block.arguments === "string" ? block.arguments : JSON.stringify(block.arguments ?? {}),
           });
           break;
-        case "tool-result":
+        case "tool-result": {
           flushMessage();
           input.push({
             type: "function_call_output",
             call_id: String(block.toolCallId ?? ""),
             output: toolResultText(block),
           });
+          const pictures = toolResultImages(block, images);
+          if (pictures.length) {
+            input.push({
+              type: "message",
+              role: "user",
+              content: [
+                { type: "input_text", text: "image from tool result" },
+                ...pictures,
+              ],
+            });
+          }
           break;
+        }
+        case "image": {
+          const part = inputImagePart(block, images);
+          if (part) content.push(part);
+          break;
+        }
         default:
-          // image or unknown: skip. No vision, no name remapping.
           break;
       }
     }
@@ -247,8 +265,8 @@ export function toResponsesInput(messages, system) {
   return { ...instructions ? { instructions } : {}, input };
 }
 
-export function requestBody(options) {
-  const { instructions, input } = toResponsesInput(options.messages, options.system);
+export function requestBody(options, images) {
+  const { instructions, input } = toResponsesInput(options.messages, options.system, images);
   const tools = toResponsesTools(options.tools);
   const sessionId = typeof options.sessionId === "string" && options.sessionId.trim() !== "" ? options.sessionId : undefined;
   return {
@@ -601,6 +619,7 @@ export function createGrokAdapter({
   fetchImpl = fetch,
   now = Date.now,
   sleepFn = sleep,
+  resolveAttachments,
 } = {}) {
   async function authorizedToken(forceRefresh = false) {
     if (forceRefresh) {
@@ -659,7 +678,10 @@ export function createGrokAdapter({
     },
     async *stream(options) {
       this.lastRequest = undefined;
-      const body = requestBody(options);
+      let attachments;
+      try { attachments = resolveAttachments?.(); } catch { attachments = undefined; }
+      const images = await loadInputImages(options.messages, attachments);
+      const body = requestBody(options, images);
       let token = await authorizedToken(false);
       let refreshed = false;
       let transportTries = 0;

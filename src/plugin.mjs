@@ -33,16 +33,25 @@ export function apply(ctx, config = {}) {
     refreshTokenFn: config.refreshToken,
   });
 
+  const resolveAttachments = () => {
+    try {
+      return ctx.get?.("attachments", false) ?? ctx.attachments ?? null;
+    } catch {
+      return null;
+    }
+  };
   const grokAdapter = createGrokAdapter({
     store,
     fetchImpl: config.fetch,
     now: config.now,
     sleepFn: config.sleep,
+    resolveAttachments,
   });
   const codexAdapter = createCodexAdapter({
     store,
     fetchImpl: config.fetch,
     now: config.now,
+    resolveAttachments,
   });
 
   const registerWithEffect = (holder, fn, label) => {
