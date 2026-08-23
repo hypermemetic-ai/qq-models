@@ -39,11 +39,19 @@ keep the request pinned to one server *and* keep the prefix byte-stable.
 
 Old/foreign assistant messages without the `xai-auth` replay envelope skip
 reasoning as before; the harness keeps each envelope opaque and only returns it
-to the same provider's adapter.
+to the same provider's adapter. Grok 4.6 efforts are the public xAI set:
+`low`, `medium`, `high` (default), and `xhigh` (extra high). Reasoning cannot
+be turned off. `xhigh` is Grok's highest level; it is not `max`.
 
-Codex (`openai-codex`) and Qwen (`qwen-token-plan`) need no equivalent: the
-Codex backend is an OpenAI Responses surface with automatic prompt caching, so
-there is no server-affinity key to stamp, and Qwen stays on the host recipe.
+Codex (`openai-codex`) uses the same Responses tool, history, SSE, encrypted-
+reasoning replay, and retry floor as Grok. The ChatGPT backend also gets
+`prompt_cache_key` from the DSH `sessionId`, `OpenAI-Beta:
+responses=experimental` (the Codex Responses surface), and
+`chatgpt-account-id` / `session-id`. GPT-5.6 Sol efforts are the public OpenAI
+set: `none`, `low`, `medium`, `high`, `xhigh`, and `max`. qq lists
+`off` for `none`. This chair defaults to `xhigh` (extra high). `/login codex` reuses `~/.pi/agent/auth.json` when that
+already has an `openai-codex` session, so a second device login is not
+required. Qwen stays on the host recipe.
 
 ## `/login` and `/logout`
 
