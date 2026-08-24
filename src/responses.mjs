@@ -272,14 +272,14 @@ export function parseSseText(text) {
   return events;
 }
 
-export async function readSse(response, signal) {
+export async function* iterateSse(response, signal) {
   if (!response.body || typeof response.body.getReader !== "function") {
-    return parseSseText(await response.text());
+    for (const event of parseSseText(await response.text())) yield event;
+    return;
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  const events = [];
   try {
     while (true) {
       if (signal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
@@ -288,12 +288,21 @@ export async function readSse(response, signal) {
       buffer += decoder.decode(value, { stream: true });
       const parts = buffer.split("\n\n");
       buffer = parts.pop() ?? "";
-      for (const part of parts) events.push(...parseSseText(part));
+      for (const part of parts) {
+        for (const event of parseSseText(part)) yield event;
+      }
     }
-    if (buffer.trim()) events.push(...parseSseText(buffer));
+    if (buffer.trim()) {
+      for (const event of parseSseText(buffer)) yield event;
+    }
   } finally {
     try { await reader.cancel(); } catch { /* closed */ }
   }
+}
+
+export async function readSse(response, signal) {
+  const events = [];
+  for await (const event of iterateSse(response, signal)) events.push(event);
   return events;
 }
 
@@ -559,16 +568,40 @@ function legacyTextChunks(events) {
   ];
 }
 
-export function chunksFromEvents(events, { replayKind } = {}) {
+export function createResponsesTranslator({ replayKind, mapEvent } = {}) {
   const translator = new ResponsesStreamTranslator(replayKind);
   const legacy = [];
-  for (const event of events) {
-    const type = typeof event?.type === "string" ? event.type : "";
-    if (type.startsWith("response.") || type === "error") translator.push(event);
-    else legacy.push(event);
-  }
-  if (translator.sawResponses) return translator.finish();
-  return legacyTextChunks(legacy);
+  let emitted = 0;
+  const drain = () => {
+    const next = translator.chunks.slice(emitted);
+    emitted = translator.chunks.length;
+    return next;
+  };
+  return {
+    push(raw) {
+      const event = mapEvent ? mapEvent(raw) : raw;
+      if (event == null) return [];
+      const type = typeof event?.type === "string" ? event.type : "";
+      if (type.startsWith("response.") || type === "error") translator.push(event);
+      else legacy.push(event);
+      return drain();
+    },
+    finish() {
+      if (translator.sawResponses) {
+        translator.finish();
+        return drain();
+      }
+      return legacyTextChunks(legacy);
+    },
+  };
+}
+
+export function chunksFromEvents(events, { replayKind, mapEvent } = {}) {
+  const translator = createResponsesTranslator({ replayKind, mapEvent });
+  const chunks = [];
+  for (const event of events) chunks.push(...translator.push(event));
+  chunks.push(...translator.finish());
+  return chunks;
 }
 
 export function asResponsesError(error, code, ErrorClass) {
@@ -586,6 +619,8 @@ export async function* streamWithRetry({
   ErrorClass,
   abortMessage,
   sleepFn = sleep,
+  replayKind,
+  mapEvent,
 }) {
   let token = await authorizedToken(false);
   let refreshed = false;
@@ -593,6 +628,14 @@ export async function* streamWithRetry({
   for (;;) {
     try {
       const events = await postOnce(options, token, body);
+      if (events && typeof events[Symbol.asyncIterator] === "function") {
+        const translator = createResponsesTranslator({ replayKind, mapEvent });
+        for await (const event of events) {
+          for (const chunk of translator.push(event)) yield chunk;
+        }
+        for (const chunk of translator.finish()) yield chunk;
+        return;
+      }
       for (const chunk of toChunks(events)) yield chunk;
       return;
     } catch (error) {

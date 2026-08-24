@@ -10,6 +10,7 @@ import {
   chunksFromEvents as sharedChunksFromEvents,
   classifyResponsesFailure,
   effortList,
+  iterateSse,
   readSse,
   redact,
   requestBody as sharedRequestBody,
@@ -68,31 +69,36 @@ export function requestBody(options) {
   });
 }
 
+export function mapCodexEvent(event) {
+  const type = typeof event?.type === "string" ? event.type : "";
+  if (type === "response.done" || type === "response.completed" || type === "response.incomplete") {
+    const response = event.response;
+    return {
+      ...event,
+      type: "response.completed",
+      response: response
+        ? {
+          ...response,
+          status: CODEX_RESPONSE_STATUSES.has(response.status) ? response.status : undefined,
+        }
+        : response,
+    };
+  }
+  return event;
+}
+
 export function mapCodexEvents(events) {
   const mapped = [];
   for (const event of events) {
     const type = typeof event?.type === "string" ? event.type : "";
-    if (type === "response.done" || type === "response.completed" || type === "response.incomplete") {
-      const response = event.response;
-      mapped.push({
-        ...event,
-        type: "response.completed",
-        response: response
-          ? {
-            ...response,
-            status: CODEX_RESPONSE_STATUSES.has(response.status) ? response.status : undefined,
-          }
-          : response,
-      });
-      break;
-    }
-    mapped.push(event);
+    mapped.push(mapCodexEvent(event));
+    if (type === "response.done" || type === "response.completed" || type === "response.incomplete") break;
   }
   return mapped;
 }
 
 export function chunksFromEvents(events) {
-  return sharedChunksFromEvents(mapCodexEvents(events), { replayKind: CODEX_REPLAY_KIND });
+  return sharedChunksFromEvents(events, { replayKind: CODEX_REPLAY_KIND, mapEvent: mapCodexEvent });
 }
 
 function accountIdOf(auth) {
@@ -151,7 +157,7 @@ export function createCodexAdapter({
         status: response.status,
       });
     }
-    return readSse(response, options.signal);
+    return iterateSse(response, options.signal);
   }
 
   return {
@@ -197,6 +203,8 @@ export function createCodexAdapter({
         toChunks: chunksFromEvents,
         ErrorClass: CodexLlmError,
         abortMessage: "codex request aborted by caller",
+        replayKind: CODEX_REPLAY_KIND,
+        mapEvent: mapCodexEvent,
         ...sleepFn === undefined ? {} : { sleepFn },
       });
     },

@@ -8,13 +8,13 @@
 import { randomUUID } from "node:crypto";
 
 import { GROK } from "./connectors.mjs";
-import { inputImagePart, loadInputImages, toolResultImages } from "./input-images.mjs";
 import { PACKAGE_IDENTITY, refreshGrokToken, userAgent } from "./oauth.mjs";
 import {
   ResponsesLlmError,
   chunksFromEvents as sharedChunksFromEvents,
   classifyResponsesFailure,
   effortList,
+  iterateSse,
   readSse,
   redact as sharedRedact,
   requestBody as sharedRequestBody,
@@ -122,7 +122,7 @@ export function createGrokAdapter({
         status: response.status,
       });
     }
-    return readSse(response, options.signal);
+    return iterateSse(response, options.signal);
   }
 
   return {
@@ -168,6 +168,7 @@ export function createGrokAdapter({
         toChunks: chunksFromEvents,
         ErrorClass: GrokLlmError,
         abortMessage: "grok request aborted by caller",
+        replayKind: GROK_REPLAY_KIND,
         ...sleepFn === undefined ? {} : { sleepFn },
       });
     },
