@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Named model connectors for the qq DSH host. Loading this plugin is how qq connects language models.",
+  "description": "Named model connectors for the core DSH host.",
   "main": "src/plugin.mjs",
   "bin": {
     "qq-models-login": "bin/login.mjs"
