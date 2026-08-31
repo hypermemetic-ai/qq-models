@@ -1,39 +1,36 @@
 # `@hypermemetic-ai/qq-models`
 
-Private ESM package providing named model connectors for the core DSH host. Its package root and `main` entry both resolve to [`src/plugin.mjs`](src/plugin.mjs).
+Private ESM package providing named model connectors for the core DSH host. The package root resolves to [`src/plugin.mjs`](src/plugin.mjs); its declared package surface and DSH bundle metadata live in [`package.json`](package.json).
 
-## Test
+## Run and verify
 
-The repository declares one task:
+The only declared package script is:
 
 ```sh
 npm test
 ```
 
-It syntax-checks the plugin and runs focused Responses diagnostics/recovery tests under [`tests/`](tests/).
+It syntax-checks [`src/plugin.mjs`](src/plugin.mjs), then runs [`tests/responses.mjs`](tests/responses.mjs) and [`tests/auto-continue.mjs`](tests/auto-continue.mjs). No install or start script, or Node.js version, is declared in the package metadata.
 
-## Repository map
+The package also maps the `qq-models-login` executable to [`bin/login.mjs`](bin/login.mjs).
 
-| Boundary | Start here |
-| --- | --- |
-| Package identity, entry points, and shipped files | [`package.json`](package.json) |
-| Root plugin entry | [`src/plugin.mjs`](src/plugin.mjs) |
-| Public module entry points | [`src/connectors.mjs`](src/connectors.mjs), [`src/command.mjs`](src/command.mjs), [`src/home.mjs`](src/home.mjs), [`src/store.mjs`](src/store.mjs), [`src/login.mjs`](src/login.mjs), and [`src/qwen.mjs`](src/qwen.mjs) |
-| `qq-models-login` executable | [`bin/login.mjs`](bin/login.mjs) |
-| DSH bundle patch | [`cordis.patch.yml`](cordis.patch.yml) |
+## System map
 
-The public subpath exports are `./connectors`, `./command`, `./home`, `./store`, `./login`, and `./qwen`; [`package.json`](package.json) is authoritative for that surface. The package is ESM (`"type": "module"`).
+- **Host integration:** [`src/plugin.mjs`](src/plugin.mjs) is both the main module and root export. The DSH bundle points at [`cordis.patch.yml`](cordis.patch.yml).
+- **Connector boundary:** [`src/connectors.mjs`](src/connectors.mjs) is an exported subpath and has the repository's highest relative-module fan-in. Model-named implementations are in [`src/codex.mjs`](src/codex.mjs), [`src/grok.mjs`](src/grok.mjs), and [`src/qwen.mjs`](src/qwen.mjs); Qwen is also a declared subpath export.
+- **Other public subpaths:** [`src/home.mjs`](src/home.mjs), [`src/store.mjs`](src/store.mjs), [`src/command.mjs`](src/command.mjs), and [`src/login.mjs`](src/login.mjs).
+- **Focused behavior and validation:** response-related work is separated into [`src/responses.mjs`](src/responses.mjs), while Grok auto-continuation has [`src/grok-auto-continue.mjs`](src/grok-auto-continue.mjs).
+
+Because `src/connectors.mjs` is widely imported within the package, review its callers' impact when changing that boundary. Keep changes compatible with ESM and the explicit export map in `package.json`.
 
 ## Route a change
 
-- **Root loading or plugin wiring:** begin with [`src/plugin.mjs`](src/plugin.mjs), then run the declared test.
-- **Public module behavior:** begin with the source mapped to that subpath above. [`src/connectors.mjs`](src/connectors.mjs) has the highest relative-import fan-in in the repository, so changes there deserve broader impact review.
-- **A model-named implementation:** use the matching tracked source when one exists: [`src/codex.mjs`](src/codex.mjs), [`src/grok.mjs`](src/grok.mjs), or [`src/qwen.mjs`](src/qwen.mjs). The evidence establishes these locations, not their runtime relationships.
-- **Login surfaces:** route the exported `./login` module to [`src/login.mjs`](src/login.mjs) and the named executable to [`bin/login.mjs`](bin/login.mjs).
-- **Exports, executable mapping, or bundle contents:** update [`package.json`](package.json); DSH patch changes belong in [`cordis.patch.yml`](cordis.patch.yml).
+| Change | Start with | Validation or adjacent context |
+| --- | --- | --- |
+| Package entry, exports, or DSH wiring | [`package.json`](package.json), [`src/plugin.mjs`](src/plugin.mjs) | [`cordis.patch.yml`](cordis.patch.yml), `npm test` |
+| Shared or model-specific connector work | [`src/connectors.mjs`](src/connectors.mjs) | [`src/codex.mjs`](src/codex.mjs), [`src/grok.mjs`](src/grok.mjs), [`src/qwen.mjs`](src/qwen.mjs) |
+| Response handling | [`src/responses.mjs`](src/responses.mjs) | [`tests/responses.mjs`](tests/responses.mjs) |
+| Grok auto-continuation | [`src/grok-auto-continue.mjs`](src/grok-auto-continue.mjs), [`src/grok.mjs`](src/grok.mjs) | [`tests/auto-continue.mjs`](tests/auto-continue.mjs) |
+| Login command or exported login surface | [`bin/login.mjs`](bin/login.mjs), [`src/login.mjs`](src/login.mjs) | Related modules: [`src/oauth.mjs`](src/oauth.mjs), [`src/pi-auth.mjs`](src/pi-auth.mjs), [`src/store.mjs`](src/store.mjs) |
 
-## Provider failure behavior
-
-Grok and Codex Responses requests retry bounded transient transport failures before any model output is exposed. Terminal failures retain a redacted, bounded HTTP status, upstream error code, response ID, and request ID when the provider supplies them. If all in-request retries fail, live Grok/Codex chairs schedule bounded continuation turns with exponential backoff rather than leaving the operator at one opaque provider error. Authentication, invalid-request, policy, and caller-abort failures never auto-continue.
-
-Validate connector changes with the declared tests and the relevant host or consumer workflow.
+For package boundaries, commands, and shipped files, treat [`package.json`](package.json) as the authoritative index.
