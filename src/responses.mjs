@@ -2,15 +2,21 @@
 // this module maps tools, history, SSE, usage, and encrypted-reasoning replay.
 
 export class ResponsesLlmError extends Error {
-  constructor(message, code, { status, cause, name } = {}) {
+  constructor(message, code, { status, cause, name, providerCode, responseId, requestId } = {}) {
     super(message, cause === undefined ? undefined : { cause });
     this.name = name ?? "ResponsesLlmError";
     this.code = code;
     if (status !== undefined) this.status = status;
+    if (providerCode !== undefined) this.providerCode = providerCode;
+    if (responseId !== undefined) this.responseId = responseId;
+    if (requestId !== undefined) this.requestId = requestId;
     this.failure = Object.freeze({
       message,
       code,
       ...status === undefined ? {} : { status },
+      ...providerCode === undefined ? {} : { providerCode },
+      ...responseId === undefined ? {} : { responseId },
+      ...requestId === undefined ? {} : { requestId },
     });
   }
 }
@@ -23,9 +29,12 @@ export function httpStatus(error) {
 
 export function classifyResponsesFailure(error) {
   const status = httpStatus(error);
-  if (status === 401) return "auth";
-  if (status === 400 || status === 422) return "reject";
-  if (status === undefined || status === 408 || status === 409 || status === 429 || status >= 500) return "transport";
+  const providerCode = String(error?.providerCode ?? "").toLowerCase();
+  if (status === 401 || /(?:auth|unauthor|token|credential)/.test(providerCode)) return "auth";
+  if (status === 400 || status === 422
+    || /(?:invalid|context_length|content_filter|content_policy|unsupported|malformed)/.test(providerCode)) return "reject";
+  if (status === undefined || status === 408 || status === 409 || status === 429 || status >= 500
+    || /(?:rate|server|timeout|overload|internal|temporar|unavailable)/.test(providerCode)) return "transport";
   return "other";
 }
 
@@ -33,6 +42,54 @@ export function redact(value) {
   return String(value ?? "")
     .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
     .replace(/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[redacted-jwt]");
+}
+
+function boundedDiagnostic(value, max = 1_000) {
+  const text = redact(value).replace(/\s+/g, " ").trim();
+  return text.length <= max ? text : `${text.slice(0, max)}…`;
+}
+
+function diagnosticId(value) {
+  const text = boundedDiagnostic(value, 160);
+  return text && /^[A-Za-z0-9._:-]+$/.test(text) ? text : undefined;
+}
+
+function numericStatus(...values) {
+  return values.find((value) => Number.isInteger(value) && value >= 100 && value <= 599);
+}
+
+/** Safe, bounded diagnostics from one terminal Responses event or HTTP failure. */
+export function providerFailureDetails(event = {}) {
+  const response = event.response && typeof event.response === "object" ? event.response : {};
+  const error = response.error && typeof response.error === "object"
+    ? response.error
+    : event.error && typeof event.error === "object" ? event.error : {};
+  const providerCode = diagnosticId(error.code ?? error.type ?? event.code);
+  const responseId = diagnosticId(response.id ?? event.response_id);
+  const requestId = diagnosticId(event.request_id ?? response.request_id);
+  const status = numericStatus(error.status, error.status_code, response.status_code, event.status, event.status_code);
+  const detail = boundedDiagnostic(error.message ?? event.message ?? "the provider reported a failed response");
+  const labels = [
+    status === undefined ? undefined : `http_status=${status}`,
+    providerCode === undefined ? undefined : `provider_code=${providerCode}`,
+    responseId === undefined ? undefined : `response_id=${responseId}`,
+    requestId === undefined ? undefined : `request_id=${requestId}`,
+  ].filter(Boolean);
+  const message = `Responses failed${labels.length > 0 ? ` (${labels.join(", ")})` : ""}${detail ? `: ${detail}` : ""}`;
+  return Object.freeze({
+    message,
+    ...status === undefined ? {} : { status },
+    ...providerCode === undefined ? {} : { providerCode },
+    ...responseId === undefined ? {} : { responseId },
+    ...requestId === undefined ? {} : { requestId },
+  });
+}
+
+export function responseEventError(event, ErrorClass = ResponsesLlmError) {
+  const type = typeof event?.type === "string" ? event.type : "";
+  if (type !== "response.failed" && type !== "error") return undefined;
+  const failure = providerFailureDetails(event);
+  return new ErrorClass(failure.message, "PROVIDER", failure);
 }
 
 export function sleep(ms, signal) {
@@ -51,7 +108,7 @@ export function sleep(ms, signal) {
 }
 
 export const TRANSPORT_TRIES = 3;
-export const TRANSPORT_BACKOFF_MS = Object.freeze([150, 400]);
+export const TRANSPORT_BACKOFF_MS = Object.freeze([750, 2_000]);
 
 function isNonArrayObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -522,12 +579,11 @@ class ResponsesStreamTranslator {
         return;
       }
       case "response.failed":
-      case "error":
-        this.finishReason("error", {
-          message: redact(event.response?.error?.message ?? event.message ?? "the provider reported a failed response"),
-          code: "PROVIDER",
-        });
+      case "error": {
+        const failure = providerFailureDetails(event);
+        this.finishReason("error", { message: failure.message, code: "PROVIDER" });
         return;
+      }
       case "response.incomplete":
         this.finishReason("error", {
           message: redact(
@@ -605,9 +661,15 @@ export function chunksFromEvents(events, { replayKind, mapEvent } = {}) {
 }
 
 export function asResponsesError(error, code, ErrorClass) {
-  if (error instanceof ErrorClass) return error;
+  if (error instanceof ErrorClass && error.code === code) return error;
   const status = httpStatus(error);
-  return new ErrorClass(redact(error?.message ?? error), code, status === undefined ? {} : { status });
+  return new ErrorClass(redact(error?.message ?? error), code, {
+    ...status === undefined ? {} : { status },
+    ...error?.providerCode === undefined ? {} : { providerCode: error.providerCode },
+    ...error?.responseId === undefined ? {} : { responseId: error.responseId },
+    ...error?.requestId === undefined ? {} : { requestId: error.requestId },
+    cause: error,
+  });
 }
 
 export async function* streamWithRetry({
@@ -630,8 +692,14 @@ export async function* streamWithRetry({
       const events = await postOnce(options, token, body);
       if (events && typeof events[Symbol.asyncIterator] === "function") {
         const translator = createResponsesTranslator({ replayKind, mapEvent });
+        let emitted = false;
         for await (const event of events) {
-          for (const chunk of translator.push(event)) yield chunk;
+          const mapped = mapEvent ? mapEvent(event) : event;
+          const failure = emitted ? undefined : responseEventError(mapped, ErrorClass);
+          if (failure) throw failure;
+          const chunks = translator.push(event);
+          if (chunks.length > 0) emitted = true;
+          for (const chunk of chunks) yield chunk;
         }
         for (const chunk of translator.finish()) yield chunk;
         return;

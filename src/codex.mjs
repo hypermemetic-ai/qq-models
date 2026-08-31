@@ -12,6 +12,7 @@ import {
   effortList,
   iterateSse,
   readSse,
+  providerFailureDetails,
   redact,
   requestBody as sharedRequestBody,
   streamWithRetry,
@@ -152,10 +153,22 @@ export function createCodexAdapter({
       throw Object.assign(new Error(redact(error?.message ?? "Responses failed")), { status: undefined });
     }
     if (!response.ok) {
-      const detail = redact(await response.text().catch(() => response.statusText));
-      throw Object.assign(new Error(`Responses failed (${response.status})${detail ? `: ${detail}` : ""}`), {
+      const raw = redact(await response.text().catch(() => response.statusText));
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
+      const upstream = parsed?.error && typeof parsed.error === "object" ? parsed.error : {};
+      const failure = providerFailureDetails({
+        type: "error",
         status: response.status,
+        request_id: response.headers?.get?.("x-request-id")
+          ?? response.headers?.get?.("request-id")
+          ?? response.headers?.get?.("cf-ray"),
+        error: {
+          code: upstream.code ?? upstream.type,
+          message: upstream.message ?? raw ?? response.statusText,
+        },
       });
+      throw Object.assign(new Error(failure.message), failure);
     }
     return iterateSse(response, options.signal);
   }

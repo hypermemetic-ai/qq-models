@@ -29,6 +29,6 @@
     }
   },
   "scripts": {
-    "test": "node --check src/plugin.mjs"
+    "test": "node --check src/plugin.mjs && node tests/responses.mjs && node tests/auto-continue.mjs"
   }
 }

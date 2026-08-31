@@ -1,5 +1,5 @@
-// Grok 4.6 only. After a turn dies with a retryable xAI Responses failure,
-// wait, then start a new turn with the same user followup the operator types.
+// Responses recovery for Grok 4.6 and OpenAI Codex. After a turn dies with
+// a retryable provider failure, wait, then start a new continuation turn.
 // Repeat attempts in a 90s window replace the previous recovery on the model
 // surface instead of stacking Continue. After five tries, stop. No model
 // fallback yet. Delete the plugin attach to retire.
@@ -8,12 +8,14 @@ import { randomUUID } from "node:crypto";
 
 export const TARGET_MODEL = "grok-4.6";
 export const TARGET_PROVIDER = "xai-auth";
+export const CODEX_MODEL = "gpt-5.6-sol";
+export const CODEX_PROVIDER = "openai-codex";
 export const RETRY_LIMIT = 5;
 export const RECOVERY = "Continue.";
 export const WINDOW_MS = 90_000;
 export const BACKOFF_MS = Object.freeze([2_000, 4_000, 8_000, 16_000, 32_000]);
 export const JITTER = 0.1;
-export const RETRYABLE = /responses failed/i;
+export const RETRYABLE = /responses failed|provider reported a failed response|provider response failed/i;
 export const FATAL_STATUS = new Set([400, 401, 403, 404, 422]);
 export const FATAL_CODES = new Set([
   "INVALID_REQUEST",
@@ -65,6 +67,35 @@ export function isGrok46(value) {
   return header?.data?.header?.config?.model === TARGET_MODEL;
 }
 
+function routeOf(value) {
+  if (!value || typeof value === "string") return {};
+  const events = value.session?.events ?? value.events;
+  const header = Array.isArray(events) ? events.findLast((event) => event?.type === "request/header") : undefined;
+  const context = Array.isArray(events) ? events.findLast((event) => event?.type === "request/context") : undefined;
+  return {
+    provider: value.provider?.id
+      ?? (typeof value.provider === "string" ? value.provider : undefined)
+      ?? value.options?.provider
+      ?? header?.data?.header?.config?.provider
+      ?? context?.data?.provider,
+    model: value.model?.id
+      ?? (typeof value.model === "string" ? value.model : undefined)
+      ?? value.options?.model
+      ?? header?.data?.header?.config?.model
+      ?? context?.data?.model,
+  };
+}
+
+export function isCodex(value) {
+  if (value === CODEX_MODEL || value === CODEX_PROVIDER) return true;
+  const route = routeOf(value);
+  return route.provider === CODEX_PROVIDER && (!route.model || route.model === CODEX_MODEL);
+}
+
+export function isRetryTarget(value) {
+  return isGrok46(value) || isCodex(value);
+}
+
 export function failureOf(event) {
   return event?.data?.reason ?? event?.reason ?? event?.message ?? event;
 }
@@ -93,7 +124,9 @@ export function isRetryableGrokError(value) {
   const text = failureText(value);
   if (!RETRYABLE.test(text)) return false;
   const code = value.error?.code ?? value.code;
+  const providerCode = value.error?.providerCode ?? value.providerCode;
   if (code && FATAL_CODES.has(code)) return false;
+  if (providerCode && /(?:auth|unauthor|token|credential|invalid|context_length|content_filter|content_policy|unsupported|malformed)/i.test(providerCode)) return false;
   const status = errorStatus(value);
   return status === undefined || !FATAL_STATUS.has(status);
 }
@@ -175,7 +208,7 @@ export function createGrokAutoContinue(deps = {}) {
     waitAbort = undefined;
     if (attempts >= limit) {
       pending = false;
-      notify(`qq grok-auto-continue: ${attempts} Responses failed retries; stopped.`);
+      notify(`qq responses-auto-continue: ${attempts} provider retries; stopped.`);
       return;
     }
     const message = recoveryMessage(attempts === 0 ? "user" : "plugin");
@@ -185,7 +218,7 @@ export function createGrokAutoContinue(deps = {}) {
     pending = true;
     pendingReplace = attempts > 1;
     followup(message);
-    notify(`qq grok-auto-continue: Responses failed; continuing (${attempts}/${limit}).`);
+    notify(`qq responses-auto-continue: provider failed; continuing (${attempts}/${limit}).`);
   };
 
   const startWait = async () => {
@@ -201,7 +234,7 @@ export function createGrokAutoContinue(deps = {}) {
       sentIds.clear();
     }
     if (attempts >= limit) {
-      notify(`qq grok-auto-continue: ${attempts} Responses failed retries; stopped.`);
+      notify(`qq responses-auto-continue: ${attempts} provider retries; stopped.`);
       return;
     }
     pending = true;
@@ -267,7 +300,7 @@ export function attachGrokAutoContinue(agent, deps = {}) {
   const session = agent?.session;
   const controller = createGrokAutoContinue({
     ...deps,
-    isGrok: deps.isGrok ?? ((ctx) => isGrok46(ctx ?? agent)),
+    isGrok: deps.isGrok ?? ((ctx) => isRetryTarget(ctx ?? agent)),
     followup: deps.followup ?? ((message) => agent?.followup?.(message)),
     replace: deps.replace ?? ((range, message) => {
       if (!session || typeof session.append !== "function") return;
@@ -297,7 +330,7 @@ export function attachGrokAutoContinue(agent, deps = {}) {
     } catch (error) {
       const logger = agent?.ctx?.logger ?? deps.logger;
       logger?.warn?.(
-        `qq grok-auto-continue: history replace refused (${error instanceof Error ? error.message : String(error)}).`,
+        `qq responses-auto-continue: history replace refused (${error instanceof Error ? error.message : String(error)}).`,
       );
     }
     return typeof next === "function" ? next() : undefined;
