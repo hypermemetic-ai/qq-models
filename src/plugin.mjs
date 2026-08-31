@@ -46,6 +46,7 @@ export function apply(ctx, config = {}) {
     store,
     fetchImpl: config.fetch,
     now: config.now,
+    sleepFn: config.sleep,
   });
 
   const registerWithEffect = (holder, fn, label) => {

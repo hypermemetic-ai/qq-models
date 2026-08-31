@@ -10,7 +10,7 @@ The repository declares one task:
 npm test
 ```
 
-It runs `node --check src/plugin.mjs`. There is no declared install, start, or broader test script, and the tracked tree contains no dedicated test files.
+It syntax-checks the plugin and runs focused Responses diagnostics/recovery tests under [`tests/`](tests/).
 
 ## Repository map
 
@@ -32,4 +32,8 @@ The public subpath exports are `./connectors`, `./command`, `./home`, `./store`,
 - **Login surfaces:** route the exported `./login` module to [`src/login.mjs`](src/login.mjs) and the named executable to [`bin/login.mjs`](bin/login.mjs).
 - **Exports, executable mapping, or bundle contents:** update [`package.json`](package.json); DSH patch changes belong in [`cordis.patch.yml`](cordis.patch.yml).
 
-Because the only declared test is a syntax check of the root plugin, validate any additional behavior with the relevant host or consumer workflow; none is established in this repository's package scripts.
+## Provider failure behavior
+
+Grok and Codex Responses requests retry bounded transient transport failures before any model output is exposed. Terminal failures retain a redacted, bounded HTTP status, upstream error code, response ID, and request ID when the provider supplies them. If all in-request retries fail, live Grok/Codex chairs schedule bounded continuation turns with exponential backoff rather than leaving the operator at one opaque provider error. Authentication, invalid-request, policy, and caller-abort failures never auto-continue.
+
+Validate connector changes with the declared tests and the relevant host or consumer workflow.
