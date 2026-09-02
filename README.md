@@ -1,38 +1,30 @@
 # `@hypermemetic-ai/qq-models`
 
-Private ESM package providing named model connectors for the core DSH host. The package root resolves to [`src/plugin.mjs`](src/plugin.mjs); its declared package surface and DSH bundle metadata live in [`package.json`](package.json).
+Named model connectors for the core DSH host. This is a private ECMAScript-module package; its default entry point is [`src/plugin.mjs`](src/plugin.mjs), and its DSH bundle patch is [`cordis.patch.yml`](cordis.patch.yml).
 
-## Run and verify
-
-The only declared package script is:
+## Run the established checks
 
 ```sh
 npm test
 ```
 
-It syntax-checks [`src/plugin.mjs`](src/plugin.mjs), then runs [`tests/responses.mjs`](tests/responses.mjs), [`tests/auto-continue.mjs`](tests/auto-continue.mjs), [`tests/auth-store.mjs`](tests/auth-store.mjs), and the exact `@deepseek-ai/dsh-llm@0.1.2-alpha.4` Cordis integration in [`tests/dsh-alpha4.mjs`](tests/dsh-alpha4.mjs). The DSH packages are `devDependencies` only; the runtime adapters stay duck-typed and do not import DSH. Install those devDependencies before `npm test`. No start script or Node.js version is declared in the package metadata.
+That script syntax-checks the plugin and then runs [`tests/responses.mjs`](tests/responses.mjs), [`tests/auto-continue.mjs`](tests/auto-continue.mjs), [`tests/auth-store.mjs`](tests/auth-store.mjs), and [`tests/dsh-alpha4.mjs`](tests/dsh-alpha4.mjs). The package declares no start script. It also exposes the installed `qq-models-login` executable from [`bin/login.mjs`](bin/login.mjs).
 
-The package also maps the `qq-models-login` executable to [`bin/login.mjs`](bin/login.mjs).
+## Repository map
 
-## System map
+- [`src/plugin.mjs`](src/plugin.mjs) is the package's main and default export; start here for host/plugin integration.
+- [`src/connectors.mjs`](src/connectors.mjs) is the public connectors subpath and the most widely imported relative module in the repository. Connector-named implementation files include [`src/codex.mjs`](src/codex.mjs), [`src/grok.mjs`](src/grok.mjs), and [`src/qwen.mjs`](src/qwen.mjs); only Qwen also has its own declared package subpath.
+- Authentication and local state are split across the public [`src/login.mjs`](src/login.mjs) and [`src/store.mjs`](src/store.mjs) modules, with supporting [`src/oauth.mjs`](src/oauth.mjs) and [`src/pi-auth.mjs`](src/pi-auth.mjs) sources.
+- The remaining declared subpaths are [`src/home.mjs`](src/home.mjs) and [`src/command.mjs`](src/command.mjs). The complete export map and dependency versions live in [`package.json`](package.json).
 
-- **Host integration:** [`src/plugin.mjs`](src/plugin.mjs) is both the main module and root export. The DSH bundle points at [`cordis.patch.yml`](cordis.patch.yml).
-- **Connector boundary:** [`src/connectors.mjs`](src/connectors.mjs) is an exported subpath and has the repository's highest relative-module fan-in. Model-named implementations are in [`src/codex.mjs`](src/codex.mjs), [`src/grok.mjs`](src/grok.mjs), and [`src/qwen.mjs`](src/qwen.mjs); Qwen is also a declared subpath export.
-- **Other public subpaths:** [`src/home.mjs`](src/home.mjs), [`src/store.mjs`](src/store.mjs), [`src/command.mjs`](src/command.mjs), and [`src/login.mjs`](src/login.mjs).
-- **Focused behavior and validation:** response-related work is separated into [`src/responses.mjs`](src/responses.mjs), while Grok auto-continuation has [`src/grok-auto-continue.mjs`](src/grok-auto-continue.mjs).
+## Route common changes
 
-Because `src/connectors.mjs` is widely imported within the package, review its callers' impact when changing that boundary. Keep changes compatible with ESM and the explicit export map in `package.json`.
-
-## Route a change
-
-| Change | Start with | Validation or adjacent context |
+| Change | Start with | Established check |
 | --- | --- | --- |
-| Package entry, exports, or DSH wiring | [`package.json`](package.json), [`src/plugin.mjs`](src/plugin.mjs) | [`cordis.patch.yml`](cordis.patch.yml), `npm test` |
-| Shared or model-specific connector work | [`src/connectors.mjs`](src/connectors.mjs) | [`src/codex.mjs`](src/codex.mjs), [`src/grok.mjs`](src/grok.mjs), [`src/qwen.mjs`](src/qwen.mjs) |
+| Plugin or DSH integration | [`src/plugin.mjs`](src/plugin.mjs), [`cordis.patch.yml`](cordis.patch.yml) | [`tests/dsh-alpha4.mjs`](tests/dsh-alpha4.mjs) |
 | Response handling | [`src/responses.mjs`](src/responses.mjs) | [`tests/responses.mjs`](tests/responses.mjs) |
 | Grok auto-continuation | [`src/grok-auto-continue.mjs`](src/grok-auto-continue.mjs), [`src/grok.mjs`](src/grok.mjs) | [`tests/auto-continue.mjs`](tests/auto-continue.mjs) |
-| Alpha.4 `LlmAdapter` defaults | [`src/grok.mjs`](src/grok.mjs), [`src/codex.mjs`](src/codex.mjs) | [`tests/dsh-alpha4.mjs`](tests/dsh-alpha4.mjs) |
-| Auth store isolation | [`src/store.mjs`](src/store.mjs), [`src/home.mjs`](src/home.mjs) | [`tests/auth-store.mjs`](tests/auth-store.mjs) |
-| Login command or exported login surface | [`bin/login.mjs`](bin/login.mjs), [`src/login.mjs`](src/login.mjs) | Related modules: [`src/oauth.mjs`](src/oauth.mjs), [`src/pi-auth.mjs`](src/pi-auth.mjs), [`src/store.mjs`](src/store.mjs) |
+| Authentication or stored credentials | [`src/login.mjs`](src/login.mjs), [`src/store.mjs`](src/store.mjs) | [`tests/auth-store.mjs`](tests/auth-store.mjs) |
+| Shared connector surface | [`src/connectors.mjs`](src/connectors.mjs) | Run the full `npm test` suite |
 
-For package boundaries, commands, and shipped files, treat [`package.json`](package.json) as the authoritative index.
+Treat [`package.json`](package.json) as authoritative for the public module surface: the declared subpaths are `.`, `home`, `store`, `connectors`, `command`, `login`, and `qwen`.
