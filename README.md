@@ -10,7 +10,7 @@ The only declared package script is:
 npm test
 ```
 
-It syntax-checks [`src/plugin.mjs`](src/plugin.mjs), then runs [`tests/responses.mjs`](tests/responses.mjs) and [`tests/auto-continue.mjs`](tests/auto-continue.mjs). No install or start script, or Node.js version, is declared in the package metadata.
+It syntax-checks [`src/plugin.mjs`](src/plugin.mjs), then runs [`tests/responses.mjs`](tests/responses.mjs), [`tests/auto-continue.mjs`](tests/auto-continue.mjs), [`tests/auth-store.mjs`](tests/auth-store.mjs), and the exact `@deepseek-ai/dsh-llm@0.1.2-alpha.4` Cordis integration in [`tests/dsh-alpha4.mjs`](tests/dsh-alpha4.mjs). The DSH packages are `devDependencies` only; the runtime adapters stay duck-typed and do not import DSH. Install those devDependencies before `npm test`. No start script or Node.js version is declared in the package metadata.
 
 The package also maps the `qq-models-login` executable to [`bin/login.mjs`](bin/login.mjs).
 
@@ -31,6 +31,8 @@ Because `src/connectors.mjs` is widely imported within the package, review its c
 | Shared or model-specific connector work | [`src/connectors.mjs`](src/connectors.mjs) | [`src/codex.mjs`](src/codex.mjs), [`src/grok.mjs`](src/grok.mjs), [`src/qwen.mjs`](src/qwen.mjs) |
 | Response handling | [`src/responses.mjs`](src/responses.mjs) | [`tests/responses.mjs`](tests/responses.mjs) |
 | Grok auto-continuation | [`src/grok-auto-continue.mjs`](src/grok-auto-continue.mjs), [`src/grok.mjs`](src/grok.mjs) | [`tests/auto-continue.mjs`](tests/auto-continue.mjs) |
+| Alpha.4 `LlmAdapter` defaults | [`src/grok.mjs`](src/grok.mjs), [`src/codex.mjs`](src/codex.mjs) | [`tests/dsh-alpha4.mjs`](tests/dsh-alpha4.mjs) |
+| Auth store isolation | [`src/store.mjs`](src/store.mjs), [`src/home.mjs`](src/home.mjs) | [`tests/auth-store.mjs`](tests/auth-store.mjs) |
 | Login command or exported login surface | [`bin/login.mjs`](bin/login.mjs), [`src/login.mjs`](src/login.mjs) | Related modules: [`src/oauth.mjs`](src/oauth.mjs), [`src/pi-auth.mjs`](src/pi-auth.mjs), [`src/store.mjs`](src/store.mjs) |
 
 For package boundaries, commands, and shipped files, treat [`package.json`](package.json) as the authoritative index.

@@ -200,6 +200,15 @@ export function createCodexAdapter({
         reasoning: CODEX_MODEL.reasoning,
       });
     },
+    imageRequestPricing() {
+      return undefined;
+    },
+    async prepareCall(provider, model, signal) {
+      return {
+        model: await this.resolveModel(provider, model, signal),
+        stream: (options) => this.stream(options),
+      };
+    },
     async *stream(options) {
       this.lastRequest = undefined;
       const body = requestBody(options);

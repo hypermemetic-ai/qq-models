@@ -29,6 +29,10 @@
     }
   },
   "scripts": {
-    "test": "node --check src/plugin.mjs && node tests/responses.mjs && node tests/auto-continue.mjs"
+    "test": "node --check src/plugin.mjs && node tests/responses.mjs && node tests/auto-continue.mjs && node tests/auth-store.mjs && node tests/dsh-alpha4.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-llm": "0.1.2-alpha.4"
   }
 }
